@@ -28,6 +28,14 @@ export class AuthService {
   ) {}
 
   async requestOtp(phone: string): Promise<{ expires_in: number }> {
+    // Test phone numbers: bypass rate limiting and SMS — fixed OTP stored directly.
+    // Never active in production — the testPhones map is always empty there.
+    const testOtp = this.getTestOtp(phone);
+    if (testOtp) {
+      await this.redis.set(`otp:${phone}`, testOtp, 'EX', OTP_TTL_SECONDS);
+      return { expires_in: OTP_TTL_SECONDS };
+    }
+
     const rateKey = `otp_rate:${phone}`;
     const count = await this.redis.incr(rateKey);
     if (count === 1) await this.redis.expire(rateKey, OTP_RATE_WINDOW);
@@ -37,8 +45,8 @@ export class AuthService {
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await this.redis.set(`otp:${phone}`, otp, 'EX', OTP_TTL_SECONDS);
-    // In production: call Termii SMS API here
-    // For dev: log OTP (never in prod)
+
+    // TODO: call Termii SMS API in production
     if (this.config.get('app.nodeEnv') === 'development') {
       console.log(`[DEV OTP] ${phone}: ${otp}`);
     }
@@ -52,11 +60,16 @@ export class AuthService {
     user: User;
     is_new_user: boolean;
   }> {
-    const attemptsKey = `otp_attempts:${phone}`;
-    const attempts = await this.redis.incr(attemptsKey);
-    if (attempts === 1) await this.redis.expire(attemptsKey, OTP_RATE_WINDOW);
-    if (attempts > OTP_ATTEMPT_LIMIT) {
-      throw new HttpException('Too many failed attempts. Try again in 10 minutes.', HttpStatus.TOO_MANY_REQUESTS);
+    const isTestPhone = !!this.getTestOtp(phone);
+
+    if (!isTestPhone) {
+      // Rate limit OTP attempts for real phones only
+      const attemptsKey = `otp_attempts:${phone}`;
+      const attempts = await this.redis.incr(attemptsKey);
+      if (attempts === 1) await this.redis.expire(attemptsKey, OTP_RATE_WINDOW);
+      if (attempts > OTP_ATTEMPT_LIMIT) {
+        throw new HttpException('Too many failed attempts. Try again in 10 minutes.', HttpStatus.TOO_MANY_REQUESTS);
+      }
     }
 
     const stored = await this.redis.get(`otp:${phone}`);
@@ -64,7 +77,11 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired OTP');
     }
 
-    await this.redis.del(`otp:${phone}`, `otp_attempts:${phone}`);
+    if (!isTestPhone) {
+      await this.redis.del(`otp:${phone}`, `otp_attempts:${phone}`);
+    }
+    // Test phones: leave the OTP in Redis so the same code works on every call
+    // without needing to re-request an OTP each time.
 
     const existing = await this.prisma.user.findUnique({ where: { phone } });
     const isNew = !existing;
@@ -108,6 +125,13 @@ export class AuthService {
       // Token already invalid — sign-out is idempotent
     }
     return { success: true };
+  }
+
+  // Returns the fixed OTP for a test phone number, or null for real phones.
+  // Always returns null in production — the config layer guarantees testPhones is empty there.
+  private getTestOtp(phone: string): string | null {
+    const testPhones = this.config.get<Record<string, string>>('app.testPhones') ?? {};
+    return testPhones[phone] ?? null;
   }
 
   private async issueTokens(user: User): Promise<{ access_token: string; refresh_token: string }> {

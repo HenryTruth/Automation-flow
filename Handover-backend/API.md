@@ -8,6 +8,7 @@
 
 ## Contents
 
+0. [Test Phone Numbers](#0-test-phone-numbers)
 1. [Authentication](#1-authentication)
 2. [Response Envelope](#2-response-envelope)
 3. [Error Codes](#3-error-codes)
@@ -23,6 +24,44 @@
 13. [Inbox & Messaging](#13-inbox--messaging)
 14. [Admin](#14-admin)
 15. [WebSocket — Live Chat](#15-websocket--live-chat)
+
+---
+
+## 0. Test Phone Numbers
+
+Use these numbers in **development and staging only** to bypass SMS and OTP rate limiting. Each number has a fixed, permanent OTP — no SMS is sent and the code never changes.
+
+> These numbers **do not work in production**. The server ignores `TEST_PHONE_NUMBERS` entirely when `NODE_ENV=production`.
+
+| Phone | OTP | Suggested use |
+|---|---|---|
+| `+2348100000001` | `000001` | Outgoing tenant (User A) |
+| `+2348100000002` | `000002` | Incoming tenant (User B) |
+| `+2348100000003` | `000003` | Second incoming tenant |
+| `+2348100000004` | `000004` | Admin user |
+| `+2348100000005` | `000005` | Spare / third user |
+
+**Behaviour differences from real phones:**
+
+| | Real phone | Test phone |
+|---|---|---|
+| SMS sent | Yes | No |
+| Rate limited (3 OTPs / 10 min) | Yes | No |
+| OTP expires after 120s | Yes | No — persists indefinitely |
+| Attempt lockout (5 failures) | Yes | No |
+| Works in production | Yes | **No** |
+
+**Example — log in as the outgoing tenant:**
+
+```http
+POST /auth/request-otp
+{ "phone": "+2348100000001" }
+
+POST /auth/verify-otp
+{ "phone": "+2348100000001", "otp": "000001" }
+```
+
+The same OTP works every time, so you can call `POST /auth/verify-otp` directly without first calling `POST /auth/request-otp` — as long as you called request-otp at least once per session (to seed the OTP into Redis).
 
 ---
 
