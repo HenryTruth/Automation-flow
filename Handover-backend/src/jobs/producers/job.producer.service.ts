@@ -19,7 +19,7 @@ export class JobProducerService {
     const job = await this.landlordQueue.add(
       JOB.LANDLORD_CONFIRM_REMINDER,
       { handoverId },
-      { delay: delayMs, jobId: `${JOB.LANDLORD_CONFIRM_REMINDER}:${handoverId}` },
+      { delay: delayMs, jobId: `${JOB.LANDLORD_CONFIRM_REMINDER}-${handoverId}` },
     );
     return job.id!;
   }
@@ -28,7 +28,7 @@ export class JobProducerService {
     const job = await this.landlordQueue.add(
       JOB.LANDLORD_CONFIRM_EXPIRED,
       { handoverId },
-      { delay: delayMs, jobId: `${JOB.LANDLORD_CONFIRM_EXPIRED}:${handoverId}` },
+      { delay: delayMs, jobId: `${JOB.LANDLORD_CONFIRM_EXPIRED}-${handoverId}` },
     );
     return job.id!;
   }
@@ -37,7 +37,7 @@ export class JobProducerService {
     const job = await this.escrowQueue.add(
       JOB.AUTO_RELEASE_WARNING,
       { handoverId },
-      { delay: delayMs, jobId: `${JOB.AUTO_RELEASE_WARNING}:${handoverId}` },
+      { delay: delayMs, jobId: `${JOB.AUTO_RELEASE_WARNING}-${handoverId}` },
     );
     return job.id!;
   }
@@ -46,7 +46,7 @@ export class JobProducerService {
     const job = await this.escrowQueue.add(
       JOB.AUTO_RELEASE_FUNDS,
       { handoverId },
-      { delay: delayMs, jobId: `${JOB.AUTO_RELEASE_FUNDS}:${handoverId}` },
+      { delay: delayMs, jobId: `${JOB.AUTO_RELEASE_FUNDS}-${handoverId}` },
     );
     return job.id!;
   }
@@ -71,7 +71,7 @@ export class JobProducerService {
     await this.refundQueue.add(
       JOB.REFUND_AUTO_APPROVE,
       { refundId, handoverId },
-      { delay: delayMs, jobId: `${JOB.REFUND_AUTO_APPROVE}:${handoverId}` },
+      { delay: delayMs, jobId: `${JOB.REFUND_AUTO_APPROVE}-${handoverId}` },
     );
   }
 
@@ -79,7 +79,7 @@ export class JobProducerService {
     await this.payoutQueue.add(
       JOB.PAYOUT_DISBURSEMENT,
       { handoverId, accountNumber, amountKobo },
-      { jobId: `${JOB.PAYOUT_DISBURSEMENT}:${handoverId}` },
+      { jobId: `${JOB.PAYOUT_DISBURSEMENT}-${handoverId}` },
     );
   }
 
@@ -87,7 +87,7 @@ export class JobProducerService {
     await this.refundQueue.add(
       JOB.REFUND_DISBURSEMENT,
       { handoverId },
-      { jobId: `${JOB.REFUND_DISBURSEMENT}:${handoverId}` },
+      { jobId: `${JOB.REFUND_DISBURSEMENT}-${handoverId}` },
     );
   }
 
@@ -95,7 +95,7 @@ export class JobProducerService {
     await this.pdfQueue.add(
       JOB.GENERATE_TENANCY_PDF,
       { handoverId },
-      { jobId: `${JOB.GENERATE_TENANCY_PDF}:${handoverId}` },
+      { jobId: `${JOB.GENERATE_TENANCY_PDF}-${handoverId}` },
     );
   }
 
@@ -103,7 +103,7 @@ export class JobProducerService {
     await this.mediatorQueue.add(
       JOB.MEDIATOR_ASSIGNMENT,
       { disputeId, handoverId },
-      { jobId: `${JOB.MEDIATOR_ASSIGNMENT}:${disputeId}` },
+      { jobId: `${JOB.MEDIATOR_ASSIGNMENT}-${disputeId}` },
     );
   }
 }
