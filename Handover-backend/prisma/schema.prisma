@@ -1,0 +1,387 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum PropertyType {
+  self_con
+  mini_flat
+  two_bedroom
+  three_bedroom
+  duplex
+  penthouse
+}
+
+enum ListingStatus {
+  draft
+  active
+  pending_handover
+  completed
+}
+
+enum ContextType {
+  enquiry
+  handover
+}
+
+enum HandoverStatus {
+  initiated
+  active
+  keys_confirmed
+  completed
+  refunded
+  disputed
+}
+
+enum EscrowStatus {
+  held
+  released_outgoing
+  released_incoming
+}
+
+enum HandoverStepName {
+  retainment_paid
+  landlord_confirmed
+  inspection_done
+  agreement_signed
+  keys_received
+}
+
+enum StepStatus {
+  done
+  active
+  pending
+}
+
+enum DisputeStatus {
+  active
+  resolved
+  withdrawn
+}
+
+enum RefundStatus {
+  pending
+  approved
+  rejected
+  withdrawn
+}
+
+enum RefundSource {
+  standard
+  admin_override
+}
+
+enum AppealStatus {
+  open
+  under_review
+  upheld
+  rejected
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  name         String // Legal name from NIN — immutable
+  displayName  String   @map("display_name")
+  phone        String   @unique
+  nin          String? // Encrypted at rest
+  selfieUrl    String?  @map("selfie_url")
+  avatarUrl    String?  @map("avatar_url")
+  isVerified   Boolean  @default(false) @map("is_verified")
+  isBanned     Boolean  @default(false) @map("is_banned")
+  bannedAt     DateTime? @map("banned_at")
+  banReason    String?  @map("ban_reason")
+  isAdmin      Boolean  @default(false) @map("is_admin")
+  deviceToken  String?  @map("device_token")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  payoutAccount          PayoutAccount?
+  notificationPreference NotificationPreference?
+  listings               Listing[]
+  savedListings          SavedListing[]
+  outgoingHandovers      Handover[]             @relation("OutgoingTenant")
+  incomingHandovers      Handover[]             @relation("IncomingTenant")
+  threadsAsA             Thread[]               @relation("ParticipantA")
+  threadsAsB             Thread[]               @relation("ParticipantB")
+  messages               Message[]
+  raisedDisputes         Dispute[]              @relation("DisputeRaisedBy")
+  requestedRefunds       Refund[]               @relation("RefundRequestedBy")
+  appeals                Appeal[]               @relation("AppealFiledBy")
+
+  @@map("users")
+}
+
+model PayoutAccount {
+  id            String   @id @default(uuid())
+  userId        String   @unique @map("user_id")
+  bankName      String   @map("bank_name")
+  accountNumber String   @map("account_number")
+  accountName   String   @map("account_name")
+  isVerified    Boolean  @default(false) @map("is_verified")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("payout_accounts")
+}
+
+model NotificationPreference {
+  userId           String  @id @map("user_id")
+  whatsapp         Boolean @default(true)
+  push             Boolean @default(true)
+  email            Boolean @default(false)
+  handoverUpdates  Boolean @default(true) @map("handover_updates")
+  disputeAlerts    Boolean @default(true) @map("dispute_alerts")
+  newMessages      Boolean @default(true) @map("new_messages")
+  marketing        Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+model Listing {
+  id             String        @id @default(uuid())
+  userId         String        @map("user_id")
+  propertyType   PropertyType  @map("property_type")
+  address        String
+  city           String
+  latitude       Decimal       @db.Decimal(10, 7)
+  longitude      Decimal       @db.Decimal(10, 7)
+  beds           Int
+  baths          Int
+  annualRent     Int           @map("annual_rent")
+  retainmentFee  Int           @map("retainment_fee")
+  availableFrom  DateTime      @map("available_from") @db.Date
+  moveOutDate    DateTime?     @map("move_out_date") @db.Date
+  story          String        @db.Text
+  amenities      String[]
+  photos         String[]
+  interestCount  Int           @default(0) @map("interest_count")
+  status         ListingStatus @default(active)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user          User          @relation(fields: [userId], references: [id])
+  handovers     Handover[]
+  savedBy       SavedListing[]
+  manual        HandoverManual?
+
+  @@index([city, status])
+  @@index([userId])
+  @@map("listings")
+}
+
+model SavedListing {
+  userId    String   @map("user_id")
+  listingId String   @map("listing_id")
+  savedAt   DateTime @default(now()) @map("saved_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([userId, listingId])
+  @@map("saved_listings")
+}
+
+model Thread {
+  id             String      @id @default(uuid())
+  participantAId String      @map("participant_a")
+  participantBId String      @map("participant_b")
+  contextType    ContextType @map("context_type")
+  // Polymorphic: points to Listing.id when enquiry, Handover.id when handover.
+  // Enforced in application code — not a DB foreign key.
+  contextId      String      @map("context_id")
+  lastMessageAt  DateTime?   @map("last_message_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  participantA User      @relation("ParticipantA", fields: [participantAId], references: [id])
+  participantB User      @relation("ParticipantB", fields: [participantBId], references: [id])
+  messages     Message[]
+
+  @@unique([participantAId, participantBId, contextType, contextId])
+  @@index([participantAId])
+  @@index([participantBId])
+  @@map("threads")
+}
+
+model Message {
+  id           String   @id @default(uuid())
+  threadId     String   @map("thread_id")
+  senderId     String   @map("sender_id")
+  body         String   @db.Text
+  readByOther  Boolean  @default(false) @map("read_by_other")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  thread Thread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender User   @relation(fields: [senderId], references: [id])
+
+  @@index([threadId, createdAt])
+  @@map("messages")
+}
+
+model Handover {
+  id                      String         @id @default(uuid())
+  listingId               String         @map("listing_id")
+  outgoingTenantId        String         @map("outgoing_tenant_id")
+  incomingTenantId        String         @map("incoming_tenant_id")
+  retainmentAmount        Int            @map("retainment_amount")
+  platformFee             Int            @map("platform_fee")
+  moveInDate              DateTime       @map("move_in_date") @db.Date
+  status                  HandoverStatus @default(initiated)
+  escrowStatus            EscrowStatus   @default(held) @map("escrow_status")
+  autoReleaseAt           DateTime?      @map("auto_release_at")
+  landlordConfirmDeadline DateTime?      @map("landlord_confirm_deadline")
+  keysConfirmedAt         DateTime?      @map("keys_confirmed_at")
+  autoReleaseJobId        String?        @map("auto_release_job_id")
+  autoReleaseWarningJobId String?        @map("auto_release_warning_job_id")
+  createdAt               DateTime       @default(now()) @map("created_at")
+
+  listing        Listing         @relation(fields: [listingId], references: [id])
+  outgoingTenant User            @relation("OutgoingTenant", fields: [outgoingTenantId], references: [id])
+  incomingTenant User            @relation("IncomingTenant", fields: [incomingTenantId], references: [id])
+  steps          HandoverStep[]
+  agreement      TenancyAgreement?
+  checklist      MoveInChecklist?
+  disputes       Dispute[]
+  refunds        Refund[]
+  appeals        Appeal[]
+
+  @@index([listingId])
+  @@index([outgoingTenantId])
+  @@index([incomingTenantId])
+  @@map("handovers")
+}
+
+model HandoverStep {
+  id          String          @id @default(uuid())
+  handoverId  String          @map("handover_id")
+  step        HandoverStepName
+  status      StepStatus      @default(pending)
+  completedAt DateTime?       @map("completed_at")
+
+  handover Handover @relation(fields: [handoverId], references: [id], onDelete: Cascade)
+
+  @@unique([handoverId, step])
+  @@map("handover_steps")
+}
+
+model TenancyAgreement {
+  id                String    @id @default(uuid())
+  handoverId        String    @unique @map("handover_id")
+  documentUrl       String?   @map("document_url")
+  outgoingSigned    Boolean   @default(false) @map("outgoing_signed")
+  incomingSigned    Boolean   @default(false) @map("incoming_signed")
+  outgoingSignedAt  DateTime? @map("outgoing_signed_at")
+  incomingSignedAt  DateTime? @map("incoming_signed_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  handover Handover @relation(fields: [handoverId], references: [id], onDelete: Cascade)
+
+  @@map("tenancy_agreements")
+}
+
+model HandoverManual {
+  id           String    @id @default(uuid())
+  listingId    String    @unique @map("listing_id")
+  appliances   String?   @db.Text
+  building     String?   @db.Text
+  utilities    String?   @db.Text
+  neighborhood String?   @db.Text
+  whatsIncluded String?  @db.Text @map("whats_included")
+  publishedAt  DateTime? @map("published_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@map("handover_manuals")
+}
+
+model MoveInChecklist {
+  handoverId            String    @id @map("handover_id")
+  inspectionCompleted   Boolean   @default(false) @map("inspection_completed")
+  agreementSigned       Boolean   @default(false) @map("agreement_signed")
+  keysCollected         Boolean   @default(false) @map("keys_collected")
+  meterToppedUp         Boolean   @default(false) @map("meter_topped_up")
+  caretakerIntroduced   Boolean   @default(false) @map("caretaker_introduced")
+  photosTaken           Boolean   @default(false) @map("photos_taken")
+  completedAt           DateTime? @map("completed_at")
+
+  handover Handover @relation(fields: [handoverId], references: [id], onDelete: Cascade)
+
+  @@map("move_in_checklists")
+}
+
+model Dispute {
+  id                  String        @id @default(uuid())
+  handoverId          String        @map("handover_id")
+  raisedById          String        @map("raised_by")
+  reason              String
+  details             String?       @db.Text
+  status              DisputeStatus @default(active)
+  outgoingConfirmed   Boolean       @default(false) @map("outgoing_confirmed")
+  incomingConfirmed   Boolean       @default(false) @map("incoming_confirmed")
+  outgoingConfirmedAt DateTime?     @map("outgoing_confirmed_at")
+  incomingConfirmedAt DateTime?     @map("incoming_confirmed_at")
+  mediatorAssignedAt  DateTime?     @map("mediator_assigned_at")
+  resolvedAt          DateTime?     @map("resolved_at")
+  createdAt           DateTime      @default(now()) @map("created_at")
+
+  handover Handover @relation(fields: [handoverId], references: [id])
+  raisedBy User     @relation("DisputeRaisedBy", fields: [raisedById], references: [id])
+  refunds  Refund[] @relation("WithdrewDispute")
+  appeal   Appeal?
+
+  @@index([handoverId, status])
+  @@map("disputes")
+}
+
+model Refund {
+  id               String       @id @default(uuid())
+  handoverId       String       @map("handover_id")
+  requestedById    String?      @map("requested_by")
+  reason           String
+  details          String?      @db.Text
+  status           RefundStatus @default(pending)
+  source           RefundSource @default(standard)
+  withdrewDisputeId String?     @map("withdrew_dispute_id")
+  processedAt      DateTime?    @map("processed_at")
+  createdAt        DateTime     @default(now()) @map("created_at")
+
+  handover       Handover  @relation(fields: [handoverId], references: [id])
+  requestedBy    User?     @relation("RefundRequestedBy", fields: [requestedById], references: [id])
+  withdrewDispute Dispute? @relation("WithdrewDispute", fields: [withdrewDisputeId], references: [id])
+
+  @@index([handoverId, status])
+  @@map("refunds")
+}
+
+model Appeal {
+  id               String      @id @default(uuid())
+  handoverId       String      @map("handover_id")
+  disputeId        String      @unique @map("dispute_id")
+  filedById        String      @map("filed_by")
+  grounds          String[]
+  evidenceDetails  String      @db.Text @map("evidence_details")
+  outgoingResponse String?     @db.Text @map("outgoing_response")
+  incomingResponse String?     @db.Text @map("incoming_response")
+  adminNotes       String?     @db.Text @map("admin_notes")
+  status           AppealStatus @default(open)
+  appealDeadline   DateTime    @map("appeal_deadline")
+  resolvedAt       DateTime?   @map("resolved_at")
+  createdAt        DateTime    @default(now()) @map("created_at")
+
+  handover Handover @relation(fields: [handoverId], references: [id])
+  dispute  Dispute  @relation(fields: [disputeId], references: [id])
+  filedBy  User     @relation("AppealFiledBy", fields: [filedById], references: [id])
+
+  @@map("appeals")
+}
